@@ -45,6 +45,15 @@ The probabilities are truncated at $max(min(p,1−10^{−15}),10^{−15})$. A sm
 
 Because of the nature of the log loss evaluation metric, it is not just accuracy of our model that matters but also the ability to correctly predict the confidence we have in our prediction. Predicting with high confidence a false prediction is heavily penalized.
 
+### Solution Approach and Prior Research.
+At it is core this project is a computer vision problem of detecting an object in a video and then classifying it. In this case the frames of the video are also well defined since they are evenly spaced around a subject. Here is some prior research and approaches I came across while researching the solution for this problem.
+
+- Multi-view Convolutional Neural Networks for 3D Shape Recognition [^2]
+- Object Detection from Video Tubelets with Convolutional Neural Networks [^3]
+- Tensorflow Object Detection API [^4]
+
+Prior to 2014, methods like Haar Cascade using OpenCV were used to solve such problems however lately Neural Net methods(CNN) have shown better results and are predominantly used to solve these kinds or problems. The TensorFlow Object Detection API came out early in 2017 and is very well documented and comes with lots of examples.  I decided to use TensorFlow Object Detection API for my approach to this project.
+
 ## II. Analysis
 ### Datasets and Inputs
 The input dataset contains a large number of body scans of a number of subjects at different granularity levels from a millimeter wave scanner. The scan for each subject  consists of the following four binary files:
@@ -54,7 +63,7 @@ The input dataset contains a large number of body scans of a number of subjects 
 - _.a3d = combined image 3D file (330MB per file)
 - _.a3daps = combined image angle sequence file (41.2MB per file)
 
-We could choose to either use the most detailed scan or the most coarse one to make our prediction. The trade-off is the time taken to process the images for training and inference, the most detailed format is 2.26 GB vs. 10.3 MB for the most coarse one. The aps format is the least detailed scan with 16 frames of images equally spaced radially.
+We could choose to either use the most detailed scan or the most coarse one to make our prediction. The trade-off is the time taken to process the images for training and inference, the most detailed format is 2.26 GB vs. 10.3 MB for the most coarse one. The aps format is the least detailed scan with 16 frames of images equally spaced radially. Each frame is a monochromatic array of size 512 x 660.
 
 The data is sensitive because of the nature of the images. Due to the confidentiality agreement I cannot display them here. It is also quite large in size and could be found on the [Competition Website](https://www.kaggle.com/c/passenger-screening-algorithm-challenge/data).
 
@@ -67,7 +76,15 @@ This is a [2 stage competition](https://www.kaggle.com/two-stage-faq) with the f
 - Stage 2
     - Testing  : 1388 subjects.
 
-In Stage 1, the maximum number of threats per subject was 3. The number of subjects having 0 to 3 threats were equally distributed. There were a total of 24 unique individuals in the Stage 1 dataset. There were 14 threats which were incorrectly labelled in the training set and I corrected them for my analysis. Stage 2 individuals were different from Stage 1. Stage 2 data was provided towards the end of the competition for scoring in the private leaderboard. So only Stage 1 data was used for training.
+In Stage 1, there were a total of 24 unique individuals. There were 14 threats which were incorrectly labelled in the training set and I corrected them for my analysis. Stage 2 individuals were different from Stage 1. Stage 2 data was provided towards the end of the competition for scoring in the private leaderboard. So only Stage 1 data was used for training.
+
+![](NumContrabandsDistr.png)
+
+The above graph shows the distribution of the number of threats in a subject in the Stage 1 dataset. We can see that the maximum number of threats per subject was 3. The number of subjects having 0 to 3 threats were more or less equally distributed.
+
+![](BodyZoneThreatDistr.png)
+
+The above graph shows the distribution threats in different body zones of the subjects in Stage 1 dataset. Again, the threats seem to be equally distributed in different body zones in the dataset.
 
 ### Algorithms and Techniques
 To come up with a model for this project, I used these two pieces of information.
@@ -90,17 +107,28 @@ There might be a large variation in human body parts ratios horizontally, but hu
 A [naive predictor](https://www.kaggle.com/philippsp/baseline-lb-0-29089) which predicts the mean probabilities of threats for all zones in Stage 1 training set results in a log loss of 0.29089 for Stage 1 test set, so my model should aim to get (way) better than this result.
 
 ## III. Methodology
-#### Training Object Detection.
-Here is the high-level flow of training object detection.
+#### Object Detection.
+#####Data Preprocessing
+Here is the high-level flow of data preprocessing needed for  object detection.
 ![Object Detection Training](ObjDectTraining.png)
 
 As discussed in the "Datasets and Inputs" section, the input scan comes in different granularity levels. I visualized the scans at different levels and I found that in the aps format(the coarsest one) I could see most of the threats. Only in approximately 1-2% of the cases I couldn't see the threats especially in the groin area. The computational needs of more detailed scans were also way too much to handle for my hardware budget. Furthermore, the increased time for analyzing such detailed scans would hinder more experimentation, so I made a decision to work with aps input format only.
 
 The TensorFlow Object Detection API takes input images in 3 channels(RGB). Our input is monochromatic. Even though converting the input to color is adding no more information, I decided not to experiment in this area and converted the monochromatic array to jpg images using matplotlib viridis color map.
 
-My experiments showed CPU only local desktop was 10x slower than a GPU for training the Object Detection API even after compiling TensorFlow with all the optimizations enabled. To use a GPU, I could either buy a new desktop or use Cloud infrastructure. The Google Cloud is well suited for TensorFlow Machine Learning workload. The Google Cloud Engine could also run this training on multiple GPUs. So even though it was a learning curve for me I choose to leverage $300 Google Trial Credit and use the Google Cloud ML Engine for training object detection and its inference.  
+The jpg images were hand labelled using [RectLabel Software](https://itunes.apple.com/us/app/rectlabel-for-object-detection/id1210181730?mt=12). During this stage the following body parts were labelled:
 
-The image/object detection libraries usually detect well defined single objects, like a cat or a dog for example. In our case, the threat can come in different shapes and sizes. It is infeasible to come up with a list of all threats upfront. So it will be interesting to see if the models can capture different threats under one label. My initial experiments showed this should be possible and I used the same label for all threats.
+- Head
+- Hands
+- Groin
+- Threat (Infact, threats were labelled as body zones the threat belongs to)
+
+The threats were labelled as body zones they belong to so that the same data could also be used in XGBOOST Zone Predction model described in the follow on sections.
+
+The hand labelled images and annotations were later parsed and converted to TFRecord format. The body zone labels for threats were programatically converted to one label called "threat". The image/object detection libraries usually detect well defined single objects, like a cat or a dog for example. In our case, the threat can come in different shapes and sizes. It is infeasible to come up with a list of all threats upfront. So it will be interesting to see if the models can capture different threats under one label. My initial experiments showed this should be possible and I used the same label for all threats.
+
+##### Implementation
+My experiments showed CPU only local desktop was 10x slower than a GPU for training the Object Detection API even after compiling TensorFlow with all the optimizations enabled. To use a GPU, I could either buy a new desktop or use Cloud infrastructure. The Google Cloud is well suited for TensorFlow Machine Learning workload. The Google Cloud Engine could also run this training on multiple GPUs. So even though it was a learning curve for me I choose to leverage $300 Google Trial Credit and use the Google Cloud ML Engine for training object detection and its inference.  
 
 The TensorFlow Object Detection API is [well documented](https://github.com/tensorflow/models/tree/master/research/object_detection) and a related paper[^1] discusses the tradeoff of accuracy vs. speed for many of the models it supports. I benchmarked the following models for my use case and picked "Faster RCNN RESNET 101" based on the following results.
 
@@ -115,7 +143,8 @@ The TensorFlow Object Detection API is [well documented](https://github.com/tens
 |  Overall Precision |  0.877 |  0.893 | 0.796
 |  Inference (for 100x16 Images) |  5.75 mins  | 56.76 mins  |  NA
 
-I also experimented with the following hyper parameters for Faster RCNN RESNET 101 and choose the optimal parameters.
+##### Refinement
+I experimented with the following hyper-parameters for Faster RCNN RESNET 101 and choose the optimal parameters.
 
 - Stride (8 and 16)
 - Max Proposals (10, 20, 50, 100, 300)
@@ -124,12 +153,13 @@ I also experimented with the following hyper parameters for Faster RCNN RESNET 1
 
 I started with 1600 images(100 subjects) and checked the results every 20K iterations and added more images to the test set based on the results. I ended up stopping at a total of 220K iterations with 3000 training images. In the end the Head/Hands/Groin were detected with a precision of more than 98%. The threats were detected with a precision of 80%.  
 
-#### Training Zone Detection.
-##### Custom Body Zone Predictor.
+#### Zone Prediction.
+Once the bounding boxes for head/hands/groin and the threat are detected, the next task is to predict the zone the threat belongs to.
 
+##### Custom Body Zone Predictor.
 <img src="ZoneDect.png" width="40%">
 
-Once the bounding boxes for head/hands/groin and the threat are detected, the next task is to predict the zone the threat belongs to. As we can see in the image above, the vertical zone a threat belongs to can be deciphered to a reasonable degree using the following formulas with assumptions on only four ratios(ForeArm_ratio, Chest_ratio, Knee_ratio, Ankle_ratio).
+As we can see in the image above, the vertical zone a threat belongs to can be deciphered to a reasonable degree using the following formulas with assumptions on only four ratios(ForeArm_ratio, Chest_ratio, Knee_ratio, Ankle_ratio).
 
 - Upper Body = Groin_Start - Head_End
 - Lower Body = Image_End - Groin_Start
@@ -150,14 +180,19 @@ I needed a few iterations to get the vertical ratios right, but once I fine tune
 
 
 ##### XGBOOST model to predict zone.
-The above custom algorithm approach gave a decent solution to the problem of zone detection. However, there were still some errors in zones 5, 17 and 9. So I tried to use a supervised learning algorithm using XGBOOST.
-
-The input for the XGBOOST model consisted of the following
+The above custom algorithm approach gave a decent solution to the problem of zone detection. However, there were still some errors in zones 5, 17 and 9. So I tried a supervised learning algorithm using XGBOOST [^5]. XGBOOST is a distributed gradient boosting library.
+The input for the XGBOOST model was generated through the following
+ways:
 
 1) The Labeled input data in "Training Object Detection" where the actual threats are hand labeled as body zones and swapped out with one label as "threat" just before inputting to TFRecord.
 2) Use the above custom zone predictor to predict body zone for all the training data and use only the correctly predict zones as input to XGBOOST.
 
-During training the XGBOOST model gave very high accuracy of more than 98%. But when applied to the overall inference the results were not as high and it looked like the model was overfitting to the test data.
+The input consisted of frame number, bounding boxes for head, hands, groin and the threat. The label was the body zone the threat belong to. The following hyperparameters were tried for the XGBOOST model.
+
+- n_estimators = [200, 300, 400, 500, 600]
+- max_depth = [4, 6, 8, 10]
+
+The XGBOOST model gave very high accuracy of more than 98% on the cross validation set. But when applied to the overall inference the results were not as high and it looked like the model was overfitting to the test data.
 
 #### Inference
 ![](Inference.png)
@@ -167,7 +202,7 @@ The overall inference model is shown in the above image. The inference was done 
 I decided to use both Custom Zone Predictor and XGBOOST model for my overall predictions since Stage 2 allowed the participants to submit 2 entries.
 
 #####Confidence level.
-My model predicted the confidence level based on the following factors.
+The model sets the confidence level based on the following factors.
 
 - Probability of threat bounding box given by the Object Detection API.
 - Number of frames the object appeared in (out of the total 16).
@@ -188,6 +223,45 @@ def getProbability(nFrames) :
 ```
 
 ## IV. Results
+
+The following results show the predictions of the model for test and validation set using the XGBOOST zone prediction. The "Correct predictions" column corresponds to the number of threats correctly predicted by the model. The "Incorrect predictions" are the number of body zones the model incorrectly predicted has having threats, usually this happens when the model incorrectly predicts a clothing accessory as a threat or when the threats on zone 5, 17 and 9 are misclassified as some other zone. The "Missed Threats" are the number of threats not detected by the model.
+
+Results of the model on the test Set with the object detection probability > 0.05
+
+Number of frames  | Total number of threats  |  Correct predictions | Incorrect predictions | Missed threats
+------|-------|---------|-----------|--------
+>= 5  |  1571 |  988 | 0   | 593
+>= 4  |  1571 | 1266 | 1   | 305
+>= 3  |  1571 | 1451 | 5   | 120
+>= 2  |  1571 | 1538 | 32  | 33
+>= 1  |  1571 | 1551 | 109 | 20
+
+Results of the model on the test Set with the object detection probability > 0.5
+
+Number of frames  | Total number of threats  |  Correct predictions | Incorrect predictions | Missed threats
+------|-------|---------|-----------|--------
+>= 5  |  1571 |  853 | 0   | 718
+>= 4  |  1571 | 1143 | 1   | 428
+>= 3  |  1571 | 1371 | 2   | 200
+>= 2  |  1571 | 1496 | 11  | 75
+>= 1  |  1571 | 1546 | 99  | 25
+
+Results of the model on the validation Set with the object detection probability > 0.05
+
+Number of frames  | Total number of threats  |  Correct predictions | Incorrect predictions | Missed threats
+------|------|---------|-----------|--------
+>= 5  |  300 |  185 | 4   | 115
+>= 4  |  300 |  235 | 5   | 65
+>= 3  |  300 | 277  | 7   | 23
+>= 2  |  300 | 288  | 15  | 12
+>= 1  |  300 | 290  | 33  | 10
+Log Loss = 0.0353
+
+As can be seen in the result, the more the number of frames a threat appears in, the more likely it is being correctly predicted. The probability of the Object Detection module also can be used to improve the prediction but at the cost of missing some threats. So the confidence level of the model's prediction is set based on the these two factors.
+
+For the validation set I got a log loss of 0.0353.
+
+#####Kaggle Results
 With the above the setup I got the following results(log loss) in the competition:
 
 1. Stage 1
@@ -199,7 +273,7 @@ With the above the setup I got the following results(log loss) in the competitio
 
 Overall ranking : [20th out of 518 teams](https://www.kaggle.com/shivgowda), Silver Medal
 
-As we can see the XGBOOST model has overfit to the test data. In retrospect this is understandable since there were only 24 unique subjects in the the test data and Stage 2 consisted of entirely different individuals.
+The XGBOOST model probably overfit to the test data. In retrospect this is understandable since there were only 24 unique subjects in the the training data and those individuals also participated in the Stage 1 test data. Stage 2 consisted of entirely different individuals.
 
 Since I based my confidence levels on the test data I was slightly more optimistic of the model detecting threats. If I had set the confidence level of 0 frames as 0.05 instead of 0.00184, I would have got a log loss score of 0.08278 with a ranking of 17 instead of 20.
 
@@ -229,14 +303,26 @@ Some participants used segmentation for their approach, such approaches yeilded 
 A few other approaches used ensemble methods, they might not be using entirely different models but similar models with different set of parameters.
 
 ## VI. Conclusion
+In summary, the model used machine learning to detect bounding boxes for objects(threats, head, hands and groin) in a series of images.  A supervised learning algorithm(XGBOOST) was trained and used for predicting the body zones a threat belongs to based on the  relative positions of bounding boxes of a threat to the head, hands and groin.
+
+![](summary.png)
+
+This model is 4 times better then just predicting the average of the threats in the body zones(baseline). The winning result of the competition is 3.5 times better than my model as seen in the image above. I think the following enhancements would have helped my model bridge the gap between the winning result.
+
+1. Place unique individuals in one set in cross validation setup during training. In my tests, I randomly picked the images for validation and hence there was leakage(because there are just 24 unique individuals) which resulted in an overconfident model.
+2. Use one model like MVCNN instead of combining two different models like I did since the errors in each stage multiply.
+3. Make use of the RGB channels to input more information.
+4. Train on more data with different individuals and different types of threats in the dataset. The result are impressive considering the fact that the training set was limited to only 24 unique individuals.
+
+It was interesting to find that a single label could be used to detect different forms and shapes of threats.
+
 This was my first Kaggle competition and I am happy with the results I got in applying the concepts learnt in the Udacity ML NanoDegree program. The first 8 members of the competition were "in the money" and I was off by just 12 rankings. Furthermore, if I had correctly tweaked the confidence level I would have been higher by 3 ranks.
 
-In hindsight and also based on the information I learnt from other members in the competition, I would incorporate the following if I were to do the project again.
 
-1. Place unique individuals in one set in cross validation setup during training.
-2. Use one model like MVCNN instead of combining two different models since the errors multiply.
-3. Make use of the RGB channels to input more information.
 
 
 [^1]: Jonathan Huang, Vivek Rathod, Chen Sun, Menglong Zhu, Anoop Korattikara, Alireza Fathi, Ian Fischer, Zbigniew Wojna, Yang Song, Sergio Guadarrama, Kevin Murphy, "Speed/accuracy trade-offs for modern convolutional object detectors", <https://arxiv.org/abs/1611.10012>
 [^2]: Hang Su, Subhransu Maji, Evangelos Kalogerakis, Erik Learned-Miller, "Multi-view Convolutional Neural Networks for 3D Shape Recognition", Proceedings of ICCV 2015, <http://vis-www.cs.umass.edu/mvcnn/>
+[^3]: Kai Kang, Wanli Ouyang, Hongsheng Li, Xiaogang Wang, "Object Detection from Video Tubelets with Convolutional Neural Networks", <https://www.cv-foundation.org/openaccess/content_cvpr_2016/papers/Kang_Object_Detection_From_CVPR_2016_paper.pdf>
+[^4]: Tensorflow Object Detection API <https://github.com/tensorflow/models/tree/master/research/object_detection>
+[^5]: Tianqi Chen, Carlos Guestrin, "XGBoost: A Scalable Tree Boosting System", <https://arxiv.org/abs/1603.02754>
