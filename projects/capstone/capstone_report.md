@@ -94,6 +94,40 @@ To come up with a model for this project, I used these two pieces of information
 
 The first will help us detect the location of a threat in an image. It will also be used to detect the location of head/hands and groin. The second will help in figuring out the body zone the threat belongs to using the relative position of the threat with respect to head, hands and groin. These two operations will be performed for each of the frames in a scan. The final logic will aggregate the predictions of all the frames to make a final prediction of the probability of threats in 17 body zones of the subject.
 
+#### Object Detection
+In this section, I am going to briefly cover the technology underlying the first stage of the proposed model- Object Detection in an image. Given an image, Object detection is an algorithm to detect the class of an object and its bounding boxes(usually a tuple containing the top-left top and bottom-right coordinates) in the image, there can be more than one object in an image. The bounding boxes are the added complexiety in Object Detection over the traditional image classification problem.
+
+Object Detection algorithms build on top of the image classification components. In the simplest Object Detection algorithm(R-CNN) a neural net based image classifier is run over an externally computed crops(bounding boxes) of the input image. More sophisticated algorithms refine the way the bounding boxes are computed, they reformulate the detection of bounding boxes as a learning of offsets over a predefined anchors for the image. The following are the two architectures based of these approach.
+
+1) Single Shot Detector (SSD)
+2) Faster R-CNN
+
+SSD based approaches use single feed-forward convolutional network to predict classes and the anchor offset in one pass through the network. Because of the single pass, they are faster for inference but lack in precision when compared to other architectures.
+
+In Faster R-CNN, the detection is done in three stages. First, the input image is sent half-way through a image classification module. Next, the features at this intermediate level are used to construct class agnostic box proposals(tied to some learning algorithm). At Last, the cropped images using box proposals are fed through the remainder of the image classification module to output the classes.
+
+To accommodate different precision, domain, training time and inference time requirements, [TensorFlow provides Object Detection algorithms](https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/detection_model_zoo.md) based on the combination of the above architectures, the underlying image classification neural nets(VGG, RESNET, INCEPTION) and pre-trained datasets (ILSVRC, COCO). I plan to benchmark the following algorithms for my use-case.
+
+- ssd_mobilenet_v1_coco
+- faster_rcnn_resnet101_coco
+- faster_rcnn_inception_resnet_v2_atrous_lowproposals_coco
+
+Once implemented, this module will provide the bounding boxes for head, hands, groin and threats in an image
+
+#####Zone Prediction using Supervised Learning
+Based on the output of the Object Detection module, if there are more than one threat in an image then the model has to predict the body zones of those threats. This task will be done using a supervised learning algorithm and I plan to use XGBOOST for this purpose.
+
+XGBOOST [^5] “Extreme Gradient Boosting” is an  implementation of gradient boosted decision trees. It is known for its speed and scalability. The input to the XGBOOST will be :
+
+- Frame Number.
+- Bounding box for the head.
+- Bounding boxes of hands.
+- Bounding boxes of groin.
+- Bounding boxes of threat.
+
+Based on the above inputs, the XGBOOST model will be trained to predict the body zone(1-17) of the threat.
+
+
 ### Benchmark
 As discussed in the above section, my model will have two steps for detecting the threats in body zones of a subject.
 
@@ -107,6 +141,11 @@ There might be a large variation in human body parts ratios horizontally, but hu
 A [naive predictor](https://www.kaggle.com/philippsp/baseline-lb-0-29089) which predicts the mean probabilities of threats for all zones in Stage 1 training set results in a log loss of 0.29089 for Stage 1 test set, so my model should aim to get (way) better than this result.
 
 ## III. Methodology
+
+![Machine Learning Pipeline](MLPipeline.png)
+
+The above diagram illustrates the machine learning pipleline used for this project. The training step involves training two machine learning models: Object Detection and Zone Prediction. For inference we first find the bounding boxes for head/hands/groin and threats and use it to predict the body zones the threats are present in.
+
 #### Object Detection.
 #####Data Preprocessing
 Here is the high-level flow of data preprocessing needed for  object detection.
@@ -128,9 +167,16 @@ The threats were labelled as body zones they belong to so that the same data cou
 The hand labelled images and annotations were later parsed and converted to TFRecord format. The body zone labels for threats were programatically converted to one label called "threat". The image/object detection libraries usually detect well defined single objects, like a cat or a dog for example. In our case, the threat can come in different shapes and sizes. It is infeasible to come up with a list of all threats upfront. So it will be interesting to see if the models can capture different threats under one label. My initial experiments showed this should be possible and I used the same label for all threats.
 
 ##### Implementation
-My experiments showed CPU only local desktop was 10x slower than a GPU for training the Object Detection API even after compiling TensorFlow with all the optimizations enabled. To use a GPU, I could either buy a new desktop or use Cloud infrastructure. The Google Cloud is well suited for TensorFlow Machine Learning workload. The Google Cloud Engine could also run this training on multiple GPUs. So even though it was a learning curve for me I choose to leverage $300 Google Trial Credit and use the Google Cloud ML Engine for training object detection and its inference.  
+My experiments showed CPU only local desktop was 10x slower than a GPU for training the Object Detection even after compiling TensorFlow with all the optimizations enabled. To use a GPU, I could either buy a new desktop or use Cloud infrastructure. The Google Cloud is well suited for TensorFlow Machine Learning workload. The Google Cloud Engine could also run this training on multiple GPUs. So even though it was a learning curve for me I choose to leverage $300 Google Trial Credit and use the Google Cloud ML Engine for training object detection and do its inference.  
 
-The TensorFlow Object Detection API is [well documented](https://github.com/tensorflow/models/tree/master/research/object_detection) and a related paper[^1] discusses the tradeoff of accuracy vs. speed for many of the models it supports. I benchmarked the following models for my use case and picked "Faster RCNN RESNET 101" based on the following results.
+The TensorFlow Object Detection module was used as a black box in this stage. I did not implement the algorithms, rather I used the pre-trained models(which can be downloaded online) with the relevant configurations to enable a particular algorithm. The details of how to use the object detection module can be found [here](https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/running_on_cloud.md).   We had to provide the following inputs.
+
+- Hand labeled images in TFRecord format for training and validation.
+- Configuration file which specifies the algorithm, location of the input images, hyper parameters for the algorithm, total number of iterations and few other other related variables.
+- Pre-trained model
+
+
+The TensorFlow Object Detection API is [well documented](https://github.com/tensorflow/models/tree/master/research/object_detection) and a related paper[^1] discusses the tradeoff of accuracy vs. speed for many of the models it supports. I benchmarked the following algorithms for my use case and picked "Faster RCNN RESNET 101" based on the following results.
 
 - Number of training images = 2230
 - Number of test images = 669
@@ -192,7 +238,7 @@ The input consisted of frame number, bounding boxes for head, hands, groin and t
 - n_estimators = [200, 300, 400, 500, 600]
 - max_depth = [4, 6, 8, 10]
 
-The XGBOOST model gave very high accuracy of more than 98% on the cross validation set. But when applied to the overall inference the results were not as high and it looked like the model was overfitting to the test data.
+The XGBOOST model gave very high accuracy of more than 98% on the cross validation set.
 
 #### Inference
 ![](Inference.png)
@@ -273,7 +319,7 @@ With the above the setup I got the following results(log loss) in the competitio
 
 Overall ranking : [20th out of 518 teams](https://www.kaggle.com/shivgowda), Silver Medal
 
-The XGBOOST model probably overfit to the test data. In retrospect this is understandable since there were only 24 unique subjects in the the training data and those individuals also participated in the Stage 1 test data. Stage 2 consisted of entirely different individuals.
+The XGBOOST model probably overfit to the test data. In retrospect this is understandable since there were only 24 unique subjects in the the training data and those individuals also participated in the Stage 1 test data. Stage 2 consisted of entirely different individuals. So in Stage 2, the Custom Zone Predictor performed better than XGBOOST.
 
 Since I based my confidence levels on the test data I was slightly more optimistic of the model detecting threats. If I had set the confidence level of 0 frames as 0.05 instead of 0.00184, I would have got a log loss score of 0.08278 with a ranking of 17 instead of 20.
 
