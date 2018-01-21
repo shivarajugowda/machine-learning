@@ -21,7 +21,7 @@ The main task of the competition is to use the output of the current sensors and
 To train and evaluate the models/algorithms in this competition, sensor dataset for training and testing are provided for several subjects. The dataset is designed to capture real scanning conditions. They are comprised of volunteers wearing different clothing types for different seasons, different body mass indices, and different genders.
 
 The body zones are defined as in this image. There are 17 zones in total.
-![Body zones](BodyZones.png)
+![Body zones](images/BodyZones.png)
 
 The threats come in different forms and shapes. They can be small handguns, knives, electronics, smuggled goods, etc. The model has to differentiate the threats from the clothing accessories.
 
@@ -78,11 +78,11 @@ This is a [2 stage competition](https://www.kaggle.com/two-stage-faq) with the f
 
 In Stage 1, there were a total of 24 unique individuals. There were 14 threats which were incorrectly labelled in the training set and I corrected them for my analysis. Stage 2 individuals were different from Stage 1. Stage 2 data was provided towards the end of the competition for scoring in the private leaderboard. So only Stage 1 data was used for training.
 
-![](NumContrabandsDistr.png)
+![](images/NumContrabandsDistr.png)
 
 The above graph shows the distribution of the number of threats in a subject in the Stage 1 dataset. We can see that the maximum number of threats per subject was 3. The number of subjects having 0 to 3 threats were more or less equally distributed.
 
-![](BodyZoneThreatDistr.png)
+![](images/BodyZoneThreatDistr.png)
 
 The above graph shows the distribution threats in different body zones of the subjects in Stage 1 dataset. Again, the threats seem to be equally distributed in different body zones in the dataset.
 
@@ -104,7 +104,7 @@ Object Detection algorithms build on top of the image classification components.
 
 SSD based approaches use single feed-forward convolutional network to predict classes and the anchor offset in one pass through the network. Because of the single pass, they are faster for inference but lack in precision when compared to other architectures.
 
-In Faster R-CNN, the detection is done in three stages. First, the input image is sent half-way through a image classification module. Next, the features at this intermediate level are used to construct class agnostic box proposals(tied to some learning algorithm). At Last, the cropped images using box proposals are fed through the remainder of the image classification module to output the classes.
+In Faster R-CNN, the detection is done in three stages. First, the input image is sent half-way through a image classification module. Next, the features at this intermediate level are used to construct class agnostic box proposals(tied to some learning algorithm). At last, the cropped images using box proposals are fed through the remainder of the image classification module to output the classes.
 
 To accommodate different precision, domain, training time and inference time requirements, [TensorFlow provides Object Detection algorithms](https://github.com/tensorflow/models/blob/master/research/object_detection/g3doc/detection_model_zoo.md) based on the combination of the above architectures, the underlying image classification neural nets(VGG, RESNET, INCEPTION) and pre-trained datasets (ILSVRC, COCO). I plan to benchmark the following algorithms for my use-case.
 
@@ -142,14 +142,14 @@ A [naive predictor](https://www.kaggle.com/philippsp/baseline-lb-0-29089) which 
 
 ## III. Methodology
 
-![Machine Learning Pipeline](MLPipeline.png)
+![Machine Learning Pipeline](images/MLPipeline.png)
 
 The above diagram illustrates the machine learning pipleline used for this project. The training step involves training two machine learning models: Object Detection and Zone Prediction. For inference we first find the bounding boxes for head/hands/groin and threats and use it to predict the body zones the threats are present in.
 
 #### Object Detection.
 #####Data Preprocessing
 Here is the high-level flow of data preprocessing needed for  object detection.
-![Object Detection Training](ObjDectTraining.png)
+![Object Detection Training](images/ObjDectTraining.png)
 
 As discussed in the "Datasets and Inputs" section, the input scan comes in different granularity levels. I visualized the scans at different levels and I found that in the aps format(the coarsest one) I could see most of the threats. Only in approximately 1-2% of the cases I couldn't see the threats especially in the groin area. The computational needs of more detailed scans were also way too much to handle for my hardware budget. Furthermore, the increased time for analyzing such detailed scans would hinder more experimentation, so I made a decision to work with aps input format only.
 
@@ -203,7 +203,7 @@ I started with 1600 images(100 subjects) and checked the results every 20K itera
 Once the bounding boxes for head/hands/groin and the threat are detected, the next task is to predict the zone the threat belongs to.
 
 ##### Custom Body Zone Predictor.
-<img src="ZoneDect.png" width="40%">
+<img src="images/ZoneDect.png" width="40%">
 
 As we can see in the image above, the vertical zone a threat belongs to can be deciphered to a reasonable degree using the following formulas with assumptions on only four ratios(ForeArm_ratio, Chest_ratio, Knee_ratio, Ankle_ratio).
 
@@ -241,7 +241,7 @@ The input consisted of frame number, bounding boxes for head, hands, groin and t
 The XGBOOST model gave very high accuracy of more than 98% on the cross validation set.
 
 #### Inference
-![](Inference.png)
+![](images/Inference.png)
 
 The overall inference model is shown in the above image. The inference was done in batches. The final stage aggregated the probabilities of all threats in all the frames and applied some heuristics to make a prediction on the probabilities of threats being present in each of the body zones of the test subjects.
 
@@ -351,7 +351,7 @@ A few other approaches used ensemble methods, they might not be using entirely d
 ## VI. Conclusion
 In summary, the model used machine learning to detect bounding boxes for objects(threats, head, hands and groin) in a series of images.  A supervised learning algorithm(XGBOOST) was trained and used for predicting the body zones a threat belongs to based on the  relative positions of bounding boxes of a threat to the head, hands and groin.
 
-![](summary.png)
+![](images/summary.png)
 
 This model is 4 times better then just predicting the average of the threats in the body zones(baseline). The winning result of the competition is 3.5 times better than my model as seen in the image above. I think the following enhancements would have helped my model bridge the gap between the winning result.
 
